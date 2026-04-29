@@ -121,6 +121,56 @@ function showToast(message) {
   }, 2800);
 }
 
+/* ── Form Draft Persistence ────────────────────────── */
+
+const DRAFT_KEY = "imageForgeDraft";
+
+function saveFormDraft() {
+  try {
+    const draft = {
+      prompt: els.imagePrompt.value,
+      product: els.productInput.value,
+      count: els.imageCount.value,
+      ratio: els.imageRatio.value,
+      brandColors: els.brandColors.value,
+      feature: els.featureInput.value,
+      selectedPresetId: state.selectedPresetId,
+      scene: els.sceneSelect.value,
+      variant: els.variantSelect.value,
+      category: els.categorySelect.value
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch { /* quota exceeded, ignore */ }
+}
+
+function restoreFormDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    if (draft.prompt) els.imagePrompt.value = draft.prompt;
+    if (draft.product) els.productInput.value = draft.product;
+    if (draft.count) els.imageCount.value = draft.count;
+    if (draft.ratio) els.imageRatio.value = draft.ratio;
+    if (draft.brandColors) els.brandColors.value = draft.brandColors;
+    if (draft.feature) els.featureInput.value = draft.feature;
+    if (draft.selectedPresetId) {
+      state.selectedPresetId = draft.selectedPresetId;
+    }
+  } catch { /* corrupted draft, ignore */ }
+}
+
+function clearFormDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+}
+
+const saveFormDraftDebounced = debounce(saveFormDraft, 500);
+
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
 function initTheme() {
   const saved = localStorage.getItem("imageForgeTheme");
   if (saved) document.documentElement.dataset.theme = saved;
@@ -1573,6 +1623,36 @@ function renderWarnings(item) {
   return `<div class="warning-row">${warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>`;
 }
 
+function copyPrompt(text) {
+  const prompt = String(text || "");
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(prompt).then(() => showToast("提示词已复制。")).catch(() => fallbackCopy(prompt));
+  } else {
+    fallbackCopy(prompt);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;opacity:0";
+  document.body.append(ta);
+  ta.select();
+  try { document.execCommand("copy"); showToast("提示词已复制。"); }
+  catch { showToast("复制失败，请手动复制。"); }
+  ta.remove();
+}
+
+function retryJob(task) {
+  els.imagePrompt.value = task.prompt || "";
+  if (task.ratio) els.imageRatio.value = task.ratio;
+  if (task.count) els.imageCount.value = String(task.count);
+  if (task.preset?.id) state.selectedPresetId = task.preset.id;
+  renderSelectedPreset(task.preset?.id ? presetDefaults(task.preset) : {});
+  switchPage("createPage", "创作");
+  showToast("已恢复任务参数，请重新提交。");
+}
+
 function renderTasks() {
   const tasks = [...state.tasks.values()].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   els.queueCount.textContent = String(tasks.length);
@@ -1599,6 +1679,7 @@ function renderTasks() {
           <div class="progress"><i style="width:${task.progress || 0}%"></i></div>
           ${task.error ? `<p class="error-copy">${escapeHtml(task.error)}</p>` : ""}
           ${renderWarnings(task)}
+          ${state.batchMode ? "" : `<div class="card-actions"><button class="mini-button" data-copy-prompt="${escapeHtml(task.prompt)}" type="button">复制提示词</button>${task.status === "failed" ? `<button class="mini-button" data-retry-task="${escapeHtml(task.id)}" type="button">重试</button>` : ""}</div>`}
           <div class="result-grid">${renderImages(task.images)}</div>
         </article>
       `
@@ -1628,6 +1709,7 @@ function renderHistory(items = []) {
           <p>${escapeHtml(item.prompt)}</p>
           ${item.error ? `<p class="error-copy">${escapeHtml(item.error)}</p>` : ""}
           ${renderWarnings(item)}
+          ${state.batchMode ? "" : `<div class="card-actions"><button class="mini-button" data-copy-prompt="${escapeHtml(item.prompt)}" type="button">复制提示词</button>${item.error ? `<button class="mini-button" data-retry-history="${escapeHtml(item.id)}" type="button">重试</button>` : ""}</div>`}
           <div class="result-grid">${renderImages(item.images)}</div>
         </article>
       `
@@ -1975,6 +2057,7 @@ async function submitGeneration(event) {
     els.referenceImage.value = "";
     els.referenceLabel.textContent = "添加参考图";
     els.referencePreview.innerHTML = "<p>未添加参考图</p>";
+    clearFormDraft();
     switchPage("tasksPage", "任务");
     showToast("任务已开始生成。");
   } catch (error) {
@@ -1989,7 +2072,13 @@ async function loadSettings() {
   const data = await getJson("/api/settings");
   const s = data.settings || {};
   els.settingApiBaseUrl.value = s.apiBaseUrl || "";
-  els.settingApiKey.value = s.apiKey || "";
+  // Don't overwrite with redacted key
+  if (s.apiKey && /^\*{3}/.test(s.apiKey)) {
+    els.settingApiKey.placeholder = s.apiKey;
+    els.settingApiKey.value = "";
+  } else {
+    els.settingApiKey.value = s.apiKey || "";
+  }
   els.settingImageModel.value = s.imageModel || "";
   els.settingRequestTimeout.value = Math.round((s.imageRequestTimeoutMs || 600000) / 1000);
   els.settingDownloadTimeout.value = Math.round((s.imageDownloadTimeoutMs || 90000) / 1000);
@@ -2004,9 +2093,10 @@ async function saveSettings(event) {
   button.disabled = true;
   button.textContent = "保存中...";
   try {
+    const apiKeyVal = els.settingApiKey.value.trim();
     const body = {
       apiBaseUrl: els.settingApiBaseUrl.value.trim(),
-      apiKey: els.settingApiKey.value.trim(),
+      apiKey: apiKeyVal || undefined, // don't send empty string which would clear the key
       imageModel: els.settingImageModel.value.trim(),
       imageRequestTimeoutMs: Number(els.settingRequestTimeout.value) * 1000,
       imageDownloadTimeoutMs: Number(els.settingDownloadTimeout.value) * 1000,
@@ -2033,6 +2123,18 @@ async function saveSettings(event) {
 /* ── Event Listeners ──────────────────────────────── */
 
 els.themeToggle.addEventListener("click", toggleTheme);
+
+/* Form draft persistence */
+els.imagePrompt.addEventListener("input", saveFormDraftDebounced);
+els.productInput.addEventListener("input", saveFormDraftDebounced);
+els.imageCount.addEventListener("change", saveFormDraft);
+els.imageRatio.addEventListener("change", saveFormDraft);
+els.brandColors.addEventListener("input", saveFormDraftDebounced);
+els.featureInput.addEventListener("input", saveFormDraftDebounced);
+els.sceneSelect.addEventListener("change", saveFormDraft);
+els.variantSelect.addEventListener("change", saveFormDraft);
+els.categorySelect.addEventListener("change", saveFormDraft);
+
 els.referenceImage.addEventListener("change", () => {
   handleReferenceChange().catch((error) => showToast(error.message || "参考图读取失败。"));
 });
@@ -2054,14 +2156,26 @@ els.refreshHistoryButton.addEventListener("click", () => {
   loadHistory().catch((error) => showToast(error.message || "历史读取失败。"));
 });
 els.taskList.addEventListener("click", (event) => {
-  const button = event.target instanceof Element ? event.target.closest("[data-delete-task]") : null;
-  if (!button) return;
-  deleteTask(button.dataset.deleteTask, button);
+  const deleteBtn = event.target instanceof Element ? event.target.closest("[data-delete-task]") : null;
+  if (deleteBtn) { deleteTask(deleteBtn.dataset.deleteTask, deleteBtn); return; }
+  const copyBtn = event.target instanceof Element ? event.target.closest("[data-copy-prompt]") : null;
+  if (copyBtn) { copyPrompt(copyBtn.dataset.copyPrompt); return; }
+  const retryBtn = event.target instanceof Element ? event.target.closest("[data-retry-task]") : null;
+  if (retryBtn) {
+    const task = state.tasks.get(retryBtn.dataset.retryTask);
+    if (task) retryJob(task);
+  }
 });
 els.historyList.addEventListener("click", (event) => {
-  const button = event.target instanceof Element ? event.target.closest("[data-delete-history]") : null;
-  if (!button) return;
-  deleteHistoryItem(button.dataset.deleteHistory, button);
+  const deleteBtn = event.target instanceof Element ? event.target.closest("[data-delete-history]") : null;
+  if (deleteBtn) { deleteHistoryItem(deleteBtn.dataset.deleteHistory, deleteBtn); return; }
+  const copyBtn = event.target instanceof Element ? event.target.closest("[data-copy-prompt]") : null;
+  if (copyBtn) { copyPrompt(copyBtn.dataset.copyPrompt); return; }
+  const retryBtn = event.target instanceof Element ? event.target.closest("[data-retry-history]") : null;
+  if (retryBtn) {
+    const item = state.allHistory.find((h) => h.id === retryBtn.dataset.retryHistory);
+    if (item) retryJob(item);
+  }
 });
 
 /* Drag-drop */
@@ -2230,6 +2344,7 @@ els.batchExit.addEventListener("click", exitBatchMode);
 /* ── Init ─────────────────────────────────────────── */
 
 initTheme();
+restoreFormDraft();
 renderTasks();
 renderHistory();
 renderSelectedPreset();

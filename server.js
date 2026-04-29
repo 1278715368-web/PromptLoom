@@ -67,10 +67,45 @@ const jobs = new Map((storedJobs.length ? storedJobs : history).map((job) => [jo
 const deletedJobIds = new Set();
 let historySaveQueue = Promise.resolve();
 let jobsSaveQueue = Promise.resolve();
+
+function debounceAsync(fn, ms) {
+  let timer;
+  let resolveList = [];
+  return () => new Promise((resolve) => {
+    resolveList.push(resolve);
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const resolvers = resolveList;
+      resolveList = [];
+      try {
+        const result = await fn();
+        resolvers.forEach((r) => r(result));
+      } catch (err) {
+        resolvers.forEach((r) => r());
+      }
+    }, ms);
+  });
+}
 const ecommerceTemplates = await loadTemplates();
 const awesomeLibrary = await loadAwesomePresets();
 let customPresetsSaveQueue = Promise.resolve();
 let customPresets = await loadCustomPresets();
+
+// Migrate completed/failed jobs from jobs to history
+const historyIds = new Set(history.map((h) => h.id));
+let migrated = 0;
+for (const [id, job] of jobs) {
+  if ((job.status === "completed" || job.status === "failed") && !historyIds.has(id)) {
+    history.unshift(publicJob(job));
+    jobs.delete(id);
+    migrated++;
+  }
+}
+if (migrated > 0) {
+  console.log(`[startup] Migrated ${migrated} completed job(s) from jobs.json to history.json.`);
+  history = history.slice(0, 100);
+  await saveHistory();
+}
 await saveJobs();
 
 async function loadCustomPresets() {
@@ -114,18 +149,41 @@ function generateToken() {
   return randomBytes(32).toString("hex");
 }
 
-const authTokens = new Set();
+const authTokens = new Map(); // token -> expiresAt timestamp
+const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const rateLimiter = new Map(); // ip -> { count, resetAt }
+
+// Clean expired tokens every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, expiresAt] of authTokens) {
+    if (expiresAt < now) authTokens.delete(token);
+  }
+}, 60 * 60 * 1000);
 
 function extractToken(req) {
   const auth = req.headers.authorization || "";
-  if (auth.startsWith("Bearer ")) return auth.slice(7).trim();
+  if (auth.startsWith("Bearer ")) {
+    const token = auth.slice(7).trim();
+    const expiresAt = authTokens.get(token);
+    if (expiresAt !== undefined) {
+      if (expiresAt < Date.now()) {
+        authTokens.delete(token);
+        return "";
+      }
+      return token;
+    }
+  }
   return "";
 }
+
+const CSP_HEADER = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'";
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "x-content-type-options": "nosniff"
+    "x-content-type-options": "nosniff",
+    "content-security-policy": CSP_HEADER
   });
   res.end(JSON.stringify(body));
 }
@@ -264,6 +322,9 @@ async function saveJobs() {
   });
   return jobsSaveQueue;
 }
+
+const saveJobsDebounced = debounceAsync(saveJobs, 300);
+const saveHistoryDebounced = debounceAsync(saveHistory, 300);
 
 function isCurrentJob(job) {
   return Boolean(job?.id) && jobs.get(job.id) === job && !deletedJobIds.has(job.id);
@@ -921,7 +982,7 @@ async function runJob(job, payload) {
   job.status = "running";
   job.statusNote = "后台已开始生成。";
   job.updatedAt = new Date().toISOString();
-  await saveJobs();
+  await saveJobsDebounced();
   const startedAt = Date.now();
 
   try {
@@ -942,7 +1003,7 @@ async function runJob(job, payload) {
             job.statusNote = `第 ${event.attempt}/${total} 次请求失败：${event.record.message}`;
           }
           job.updatedAt = new Date().toISOString();
-          await saveJobs();
+          await saveJobsDebounced();
         }
       });
       if (!isCurrentJob(job)) return;
@@ -965,7 +1026,7 @@ async function runJob(job, payload) {
       });
       job.progress = Math.round((job.images.length / job.count) * 100);
       job.updatedAt = new Date().toISOString();
-      await saveJobs();
+      await saveJobsDebounced();
     }
 
     if (!isCurrentJob(job)) return;
@@ -974,6 +1035,7 @@ async function runJob(job, payload) {
     job.completedAt = new Date().toISOString();
     job.updatedAt = job.completedAt;
     history.unshift(publicJob(job));
+    jobs.delete(job.id);
     await saveJobs();
     await saveHistory();
     pushDebugRecord({
@@ -1000,6 +1062,7 @@ async function runJob(job, payload) {
     job.statusNote = job.error;
     job.updatedAt = new Date().toISOString();
     history.unshift(publicJob(job));
+    jobs.delete(job.id);
     await saveJobs();
     await saveHistory();
     pushDebugRecord({
@@ -1080,7 +1143,7 @@ async function handleApi(req, res) {
       const stored = settings.lanPassword || "";
       if (!stored) {
         const token = generateToken();
-        authTokens.add(token);
+        authTokens.set(token, Date.now() + TOKEN_TTL_MS);
         sendJson(res, 200, { token, authRequired: false });
         return;
       }
@@ -1090,7 +1153,7 @@ async function handleApi(req, res) {
         return;
       }
       const token = generateToken();
-      authTokens.add(token);
+      authTokens.set(token, Date.now() + TOKEN_TTL_MS);
       sendJson(res, 200, { token, authRequired: true });
       return;
     }
@@ -1260,6 +1323,25 @@ async function handleApi(req, res) {
     }
 
     if (pathname === "/api/generate" && req.method === "POST") {
+      // Rate limiting: max 10 requests per minute per IP
+      const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+      const now = Date.now();
+      const entry = rateLimiter.get(clientIp);
+      if (entry && entry.resetAt > now) {
+        if (entry.count >= 10) {
+          const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+          res.writeHead(429, {
+            "content-type": "application/json; charset=utf-8",
+            "retry-after": String(retryAfter),
+            "content-security-policy": CSP_HEADER
+          });
+          res.end(JSON.stringify({ error: `请求过于频繁，请 ${retryAfter} 秒后重试。` }));
+          return;
+        }
+        entry.count++;
+      } else {
+        rateLimiter.set(clientIp, { count: 1, resetAt: now + 60000 });
+      }
       const body = await readJson(req);
       const job = await enqueueJob(body);
       sendJson(res, 202, { job: publicJob(job) });
@@ -1299,7 +1381,11 @@ async function handleApi(req, res) {
     }
 
     if (pathname === "/api/settings" && req.method === "GET") {
-      const safeSettings = { ...settings, lanPassword: settings.lanPassword ? "********" : "" };
+      const safeSettings = {
+        ...settings,
+        apiKey: settings.apiKey ? `***${settings.apiKey.slice(-4)}` : "",
+        lanPassword: settings.lanPassword ? "********" : ""
+      };
       sendJson(res, 200, { settings: safeSettings });
       return;
     }
@@ -1313,7 +1399,9 @@ async function handleApi(req, res) {
       for (const key of allowed) {
         if (body[key] !== undefined) {
           if (key === "apiBaseUrl" || key === "imageModel" || key === "apiKey") {
-            settings[key] = String(body[key]).trim();
+            const val = String(body[key]).trim();
+            if (key === "apiKey" && /^\*{3}/.test(val)) continue; // skip redacted key
+            settings[key] = val;
           } else {
             settings[key] = Number(body[key]);
           }
@@ -1361,7 +1449,8 @@ async function serveStatic(req, res) {
     res.writeHead(200, {
       "content-type": mimeTypes[extname(filePath)] || "application/octet-stream",
       "x-content-type-options": "nosniff",
-      "x-frame-options": "SAMEORIGIN"
+      "x-frame-options": "SAMEORIGIN",
+      "content-security-policy": CSP_HEADER
     });
     res.end(content);
   } catch (error) {
@@ -1370,12 +1459,13 @@ async function serveStatic(req, res) {
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "x-content-type-options": "nosniff",
-        "x-frame-options": "SAMEORIGIN"
+        "x-frame-options": "SAMEORIGIN",
+        "content-security-policy": CSP_HEADER
       });
       res.end(content);
     } else {
       console.error("[static] file read error:", error.message);
-      res.writeHead(500, { "x-content-type-options": "nosniff" });
+      res.writeHead(500, { "x-content-type-options": "nosniff", "content-security-policy": CSP_HEADER });
       res.end("Internal Server Error");
     }
   }
@@ -1396,6 +1486,9 @@ server.listen(port, "0.0.0.0", () => {
 
 function gracefulShutdown(signal) {
   console.log(`\n[shutdown] Received ${signal}, shutting down gracefully...`);
+  // Flush any debounced writes immediately
+  saveJobs().catch(() => {});
+  saveHistory().catch(() => {});
   const runningJobs = [...jobs.values()].filter((j) => j.status === "running" || j.status === "queued");
   if (runningJobs.length) {
     console.log(`[shutdown] Waiting for ${runningJobs.length} active job(s) to finish (max 30s)...`);
@@ -1410,6 +1503,9 @@ function gracefulShutdown(signal) {
       } else {
         console.log("[shutdown] All jobs completed.");
       }
+      // Final flush before exit
+      saveJobs().catch(() => {});
+      saveHistory().catch(() => {});
       server.close(() => process.exit(0));
       setTimeout(() => process.exit(0), 3000);
     }

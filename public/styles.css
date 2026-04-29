@@ -29,23 +29,6 @@
   --shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #121218;
-    --ink: #e8e8ec;
-    --muted: #8b8fa0;
-    --card: #1c1c24;
-    --soft: #24242e;
-    --line: #2e2e3a;
-    --accent: #ff6b4a;
-    --accent-2: #14b8b0;
-    --black: #e8e8ec;
-    --danger: #f05555;
-    --shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
-  }
-}
-
 * {
   box-sizing: border-box;
 }
@@ -59,12 +42,6 @@ body {
 
 [data-theme="dark"] body {
   background: linear-gradient(180deg, #16161e 0%, var(--bg) 42%, #0e0e14 100%);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) body {
-    background: linear-gradient(180deg, #16161e 0%, var(--bg) 42%, #0e0e14 100%);
-  }
 }
 
 button,
@@ -550,6 +527,15 @@ input {
   color: #7a4300;
 }
 
+.card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.card-actions .mini-button {
+  font-size: 12px;
+}
+
 .progress {
   height: 10px;
   overflow: hidden;
@@ -728,28 +714,6 @@ input {
 [data-theme="dark"] .tab-button.is-active { background: var(--ink); color: var(--bg); }
 [data-theme="dark"] .generate-button { background: var(--ink); color: var(--bg); }
 [data-theme="dark"] .result-tile span { background: rgba(232, 232, 236, 0.78); color: #121218; }
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .prompt-box { background: #2a1a16; }
-  :root:not([data-theme="light"]) .selected-preset { background: #1a2a2a; }
-  :root:not([data-theme="light"]) .preset-card.is-selected { background: #1a2a2a; }
-  :root:not([data-theme="light"]) .task-card.running { background: #2a1e16; }
-  :root:not([data-theme="light"]) .reference-card { background: #1a2a2a; }
-  :root:not([data-theme="light"]) .warning-row span { background: #3a2e00; color: #f0c060; }
-  :root:not([data-theme="light"]) .app-header { background: linear-gradient(180deg, rgba(18, 18, 24, 0.96), rgba(18, 18, 24, 0.72)); }
-  :root:not([data-theme="light"]) .bottom-tabs { background: rgba(28, 28, 36, 0.94); }
-  :root:not([data-theme="light"]) .preset-head em { color: var(--ink); }
-  :root:not([data-theme="light"]) .task-card p,
-  :root:not([data-theme="light"]) .history-card p,
-  :root:not([data-theme="light"]) .preset-card p { color: var(--ink); }
-  :root:not([data-theme="light"]) .progress { background: var(--soft); }
-  :root:not([data-theme="light"]) .reference-preview { background: rgba(30, 30, 40, 0.55); }
-  :root:not([data-theme="light"]) .danger-button { background: var(--card); }
-  :root:not([data-theme="light"]) .filter-chip.is-active { background: var(--ink); color: var(--bg); }
-  :root:not([data-theme="light"]) .tab-button.is-active { background: var(--ink); color: var(--bg); }
-  :root:not([data-theme="light"]) .generate-button { background: var(--ink); color: var(--bg); }
-  :root:not([data-theme="light"]) .result-tile span { background: rgba(232, 232, 236, 0.78); color: #121218; }
-}
 
 /* Theme toggle button */
 .theme-toggle {
