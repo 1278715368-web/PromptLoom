@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Image Forge</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="auth-overlay" id="authOverlay" hidden>
+      <div class="auth-card">
+        <p class="eyebrow">Image Forge</p>
+        <h2>输入访问密码</h2>
+        <form id="authForm">
+          <label class="field">
+            <span>密码</span>
+            <input id="authPassword" type="password" autocomplete="off" placeholder="输入局域网访问密码" />
+          </label>
+          <button class="generate-button" type="submit">进入</button>
+        </form>
+        <p class="auth-error" id="authError"></p>
+      </div>
+    </div>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Image Forge</p>
+          <h1 id="pageTitle">创作</h1>
+        </div>
+        <div class="model-chip" id="modelBadge">gpt-image-2</div>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换主题">🌙</button>
+      </header>
+
+      <section class="tab-page is-active" id="createPage">
+        <form class="create-form" id="imageForm">
+          <label class="prompt-box">
+            <span>画面需求</span>
+            <textarea id="imagePrompt" rows="5" placeholder="例如：护肤品白底主图，高级感，黑金配色，柔和棚拍光"></textarea>
+          </label>
+
+          <section class="active-brief">
+            <div class="picker-head">
+              <span id="strategyKind">当前策略</span>
+              <button id="openPresetsButton" type="button">灵感库</button>
+            </div>
+            <div class="selected-preset" id="selectedPreset">
+              <strong>自动策略</strong>
+              <p>根据画面需求自动匹配场景与结构。</p>
+            </div>
+          </section>
+
+          <label class="field">
+            <span id="productLabel">主体</span>
+            <input id="productInput" autocomplete="off" placeholder="磨砂玻璃精华瓶，银色泵头" />
+          </label>
+
+          <div class="quick-grid">
+            <label class="field">
+              <span>张数</span>
+              <select id="imageCount">
+                <option value="1">1 张</option>
+                <option value="2">2 张</option>
+                <option value="3">3 张</option>
+                <option value="4">4 张</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>比例</span>
+              <select id="imageRatio">
+                <option value="1:1">1:1</option>
+                <option value="2:3">2:3</option>
+                <option value="3:2">3:2</option>
+                <option value="9:16">9:16</option>
+                <option value="16:9">16:9</option>
+                <option value="3:4">3:4</option>
+                <option value="4:3">4:3</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="reference-card" id="dropZone">
+            <input id="referenceImage" type="file" accept="image/png,image/jpeg,image/webp" />
+            <span>参考图</span>
+            <strong id="referenceLabel">添加参考图</strong>
+            <small>用于保持主体外观一致</small>
+          </label>
+
+          <div class="reference-preview" id="referencePreview">
+            <p>未添加参考图</p>
+          </div>
+
+          <details class="strategy-sheet">
+            <summary>
+              <strong id="strategyTitle">创作策略</strong>
+              <small id="strategySubtitle">场景、风格、卖点</small>
+            </summary>
+            <div class="strategy-fields">
+              <label class="field" id="sceneField">
+                <span id="sceneLabel">场景</span>
+                <select id="sceneSelect">
+                  <option value="">自动匹配</option>
+                </select>
+              </label>
+              <label class="field" id="variantField">
+                <span id="variantLabel">变体</span>
+                <select id="variantSelect">
+                  <option value="">默认</option>
+                </select>
+              </label>
+              <label class="field" id="categoryField">
+                <span id="categoryLabel">品类</span>
+                <select id="categorySelect">
+                  <option value="">自动识别</option>
+                  <option value="beauty">美妆护肤</option>
+                  <option value="electronics">电子数码</option>
+                  <option value="food">食品饮料</option>
+                  <option value="fashion">服装配饰</option>
+                  <option value="home">家居生活</option>
+                  <option value="jewelry">珠宝腕表</option>
+                  <option value="sports">运动健身</option>
+                </select>
+              </label>
+              <label class="field">
+                <span id="brandColorsLabel">品牌色</span>
+                <input id="brandColors" autocomplete="off" placeholder="黑金、奶油白、#EC4899" />
+              </label>
+              <label class="field full">
+                <span id="featureLabel">核心卖点</span>
+                <textarea id="featureInput" rows="3" placeholder="补水、轻盈、敏感肌可用、旅行装"></textarea>
+              </label>
+            </div>
+          </details>
+
+          <button class="generate-button" id="imageButton" type="submit">开始生成</button>
+        </form>
+      </section>
+
+      <section class="tab-page" id="presetsPage">
+        <div class="section-bar">
+          <h2>灵感库</h2>
+          <span id="presetCount">0</span>
+        </div>
+        <div class="custom-preset-bar">
+          <button class="ghost-button" id="addPresetButton" type="button">+ 新建预设</button>
+        </div>
+        <label class="search-box">
+          <span>全局搜索</span>
+          <input id="presetSearch" type="search" autocomplete="off" placeholder="搜索标题、关键词、分类" />
+        </label>
+        <div class="filter-row" id="presetFilters"></div>
+        <div class="preset-list" id="presetList">
+          <p class="empty-copy">正在加载预设。</p>
+        </div>
+      </section>
+
+      <section class="tab-page" id="tasksPage">
+        <div class="section-bar">
+          <h2>后台任务</h2>
+          <span id="queueCount">0</span>
+          <button class="ghost-button" id="taskSelectMode" type="button">选择</button>
+        </div>
+        <div class="task-list" id="taskList">
+          <p class="empty-copy">提交后会在这里看到进度。</p>
+        </div>
+      </section>
+
+      <section class="tab-page" id="historyPage">
+        <div class="section-bar">
+          <h2>历史图库</h2>
+          <span id="historyCount">0</span>
+        </div>
+        <label class="search-box">
+          <span>搜索历史</span>
+          <input id="historySearch" type="search" autocomplete="off" placeholder="搜索提示词、预设、模板" />
+        </label>
+        <div class="filter-row" id="historyFilters">
+          <button class="filter-chip is-active" data-hfilter="all" type="button">全部</button>
+          <button class="filter-chip" data-hfilter="today" type="button">今天</button>
+          <button class="filter-chip" data-hfilter="week" type="button">本周</button>
+          <button class="filter-chip" data-hfilter="ref" type="button">参考图</button>
+          <button class="filter-chip" data-hfilter="text" type="button">文生图</button>
+        </div>
+        <div class="history-actions">
+          <button class="ghost-button" id="refreshHistoryButton" type="button">刷新</button>
+          <button class="ghost-button" id="historySelectMode" type="button">选择</button>
+          <button class="danger-button" id="clearAllHistoryButton" type="button">清空全部</button>
+        </div>
+        <div class="history-list" id="historyList">
+          <p class="empty-copy">生成完成后会保存到这里。</p>
+        </div>
+      </section>
+
+      <section class="tab-page" id="settingsPage">
+        <div class="section-bar">
+          <h2>设置</h2>
+        </div>
+        <form class="settings-form" id="settingsForm">
+          <label class="field">
+            <span>API 地址</span>
+            <input id="settingApiBaseUrl" type="url" autocomplete="off" placeholder="https://your-api-url/v1" />
+          </label>
+          <label class="field">
+            <span>API Key</span>
+            <input id="settingApiKey" type="password" autocomplete="off" placeholder="sk-..." />
+          </label>
+          <label class="field">
+            <span>模型名称</span>
+            <input id="settingImageModel" type="text" autocomplete="off" placeholder="gpt-image-2" />
+          </label>
+          <div class="quick-grid">
+            <label class="field">
+              <span>请求超时（秒）</span>
+              <input id="settingRequestTimeout" type="number" min="30" max="1800" step="10" placeholder="600" />
+            </label>
+            <label class="field">
+              <span>下载超时（秒）</span>
+              <input id="settingDownloadTimeout" type="number" min="10" max="600" step="10" placeholder="90" />
+            </label>
+          </div>
+          <div class="quick-grid">
+            <label class="field">
+              <span>最大重试次数</span>
+              <input id="settingMaxAttempts" type="number" min="1" max="8" step="1" placeholder="4" />
+            </label>
+            <label class="field">
+              <span>最大生成张数</span>
+              <input id="settingMaxCompare" type="number" min="1" max="4" step="1" placeholder="4" />
+            </label>
+          </div>
+          <label class="field">
+            <span>局域网密码</span>
+            <input id="settingLanPassword" type="password" autocomplete="off" placeholder="留空则无需密码" />
+          </label>
+          <button class="generate-button" id="saveSettingsButton" type="submit">保存设置</button>
+        </form>
+      </section>
+
+      <div class="preset-modal-overlay" id="presetModal" hidden>
+        <div class="preset-modal">
+          <div class="preset-modal-header">
+            <strong id="presetModalTitle">新建预设</strong>
+            <button class="mini-button" id="presetModalClose" type="button">✕</button>
+          </div>
+          <form class="preset-modal-form" id="presetModalForm">
+            <input type="hidden" id="presetEditId" />
+            <label class="field">
+              <span>预设标题</span>
+              <input id="presetFormTitle" type="text" required placeholder="例如：清新护肤主图" />
+            </label>
+            <label class="field">
+              <span>分类</span>
+              <input id="presetFormCategory" type="text" placeholder="例如：电商" />
+            </label>
+            <label class="field">
+              <span>提示词模板</span>
+              <textarea id="presetFormPrompt" rows="4" placeholder="描述画面结构、风格要求..."></textarea>
+            </label>
+            <label class="field">
+              <span>示例描述</span>
+              <input id="presetFormExample" type="text" placeholder="用户填写时的参考文案" />
+            </label>
+            <label class="field">
+              <span>标签（逗号分隔）</span>
+              <input id="presetFormTags" type="text" placeholder="护肤品, 白底, 高级感" />
+            </label>
+            <div class="quick-grid">
+              <label class="field">
+                <span>关联模板 ID</span>
+                <input id="presetFormTemplateId" type="text" placeholder="可选" />
+              </label>
+              <label class="field">
+                <span>比例</span>
+                <select id="presetFormRatio">
+                  <option value="">自动</option>
+                  <option value="1:1">1:1</option>
+                  <option value="2:3">2:3</option>
+                  <option value="3:2">3:2</option>
+                  <option value="9:16">9:16</option>
+                  <option value="16:9">16:9</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span><input id="presetFormRequiresRef" type="checkbox" /> 需要参考图</span>
+            </label>
+            <button class="generate-button" type="submit">保存预设</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="lightbox-overlay" id="lightbox" role="dialog" aria-modal="true" aria-label="图片查看器" hidden>
+        <div class="lightbox-backdrop"></div>
+        <div class="lightbox-content">
+          <img class="lightbox-image" id="lightboxImage" src="" alt="查看大图" />
+        </div>
+        <div class="lightbox-controls">
+          <button class="lightbox-btn" id="lightboxPrev" type="button" aria-label="上一张">‹</button>
+          <span class="lightbox-counter" id="lightboxCounter">1/1</span>
+          <button class="lightbox-btn" id="lightboxNext" type="button" aria-label="下一张">›</button>
+        </div>
+        <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭">✕</button>
+      </div>
+
+      <div class="batch-bar" id="batchBar" hidden>
+        <div class="batch-bar-inner">
+          <button class="ghost-button" id="batchSelectAll" type="button">全选</button>
+          <span class="batch-count" id="batchCount">已选 0 项</span>
+          <div class="batch-actions">
+            <button class="ghost-button" id="batchDownload" type="button">下载</button>
+            <button class="danger-button" id="batchDelete" type="button">删除</button>
+          </div>
+          <button class="mini-button" id="batchExit" type="button">取消</button>
+        </div>
+      </div>
+    </main>
+
+    <nav class="bottom-tabs" aria-label="主要导航">
+      <button class="tab-button is-active" data-page="createPage" data-title="创作" type="button">
+        <span>＋</span>
+        <strong>创作</strong>
+      </button>
+      <button class="tab-button" data-page="presetsPage" data-title="灵感" type="button">
+        <span>◇</span>
+        <strong>灵感</strong>
+      </button>
+      <button class="tab-button" data-page="tasksPage" data-title="任务" type="button">
+        <span>◌</span>
+        <strong>任务</strong>
+      </button>
+      <button class="tab-button" data-page="historyPage" data-title="历史" type="button">
+        <span>▦</span>
+        <strong>历史</strong>
+      </button>
+      <button class="tab-button" data-page="settingsPage" data-title="设置" type="button">
+        <span>⚙</span>
+        <strong>设置</strong>
+      </button>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

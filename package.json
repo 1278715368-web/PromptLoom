@@ -1,0 +1,15 @@
+{
+  "name": "local-mobile-ai-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local mobile-first AI console for OpenAI-compatible and Anthropic APIs.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

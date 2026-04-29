@@ -1,0 +1,7 @@
+data/settings.json
+data/history.json
+data/jobs.json
+data/custom-presets.json
+public/generated/
+node_modules/
+.claude/
